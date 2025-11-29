@@ -12,7 +12,6 @@ if not BOT_TOKEN:
     raise ValueError("❌ Переменная BOT_TOKEN не задана.")
 
 # 🔒 Список доверенных пользователей (оставьте пустым для публичного бота)
-# Пример: ALLOWED_USER_IDS = {123456789, 987654321}
 ALLOWED_USER_IDS = set()
 
 DB_PATH = 'walk_private.db'
@@ -28,14 +27,13 @@ MONTH_NAMES = {
 }
 
 # === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
+
 def check_allowed(user_id):
-    """Проверка доступа для callback-запросов."""
     if ALLOWED_USER_IDS and user_id not in ALLOWED_USER_IDS:
         return False
     return True
 
 def allowed_only(func):
-    """Декоратор для message-обработчиков."""
     def wrapper(message):
         if ALLOWED_USER_IDS and message.from_user.id not in ALLOWED_USER_IDS:
             bot.reply_to(message, "🔒 Этот бот доступен только по приглашению.")
@@ -103,6 +101,12 @@ def init_db():
                 FOREIGN KEY (proposal_id) REFERENCES proposals (id) ON DELETE CASCADE
             )
         ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_settings (
+                user_id INTEGER PRIMARY KEY,
+                reminder_minutes INTEGER DEFAULT 10
+            )
+        ''')
 
 def cleanup_old_counts():
     today = date.today().isoformat()
@@ -149,17 +153,26 @@ def increment_proposal_count(user_id):
             (user_id, today)
         )
 
-def is_time_in_future(time_str):
+def parse_proposal_datetime(input_str):
     now = datetime.now()
-    try:
-        proposed_time = datetime.strptime(time_str, "%H:%M").replace(
-            year=now.year, month=now.month, day=now.day
-        )
-        if proposed_time <= now:
-            proposed_time += timedelta(days=1)
-        return proposed_time
-    except ValueError:
-        return None
+    input_clean = input_str.strip()
+    # Поддержка формата: YYYY-MM-DD HH:MM
+    if re.match(r'^\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}$', input_clean):
+        try:
+            return datetime.strptime(input_clean, "%Y-%m-%d %H:%M")
+        except ValueError:
+            return None
+    # Поддержка формата: HH:MM (только время)
+    if re.match(r'^([01]?[0-9]|2[0-3]):[0-5][0-9]$', input_clean):
+        try:
+            t = datetime.strptime(input_clean, "%H:%M")
+            proposed = now.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0)
+            if proposed <= now:
+                proposed += timedelta(days=1)
+            return proposed
+        except:
+            return None
+    return None
 
 def get_all_message_ids_for_proposal(proposal_id):
     with sqlite3.connect(DB_PATH) as conn:
@@ -291,12 +304,53 @@ def cleanup_old_proposals():
         if deleted_7d:
             print(f"🧹 Удалено {deleted_7d} очень старых предложений")
 
-def main_menu_keyboard():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
-    markup.add("Меню бота")
-    markup.add("Предложить время для прогулки")
-    markup.add("Мои предложения")
-    markup.add("Помощь")
+def set_reminder_minutes(user_id, minutes):
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO user_settings (user_id, reminder_minutes) VALUES (?, ?) "
+            "ON CONFLICT(user_id) DO UPDATE SET reminder_minutes = ?",
+            (user_id, minutes, minutes)
+        )
+
+def get_reminder_minutes(user_id):
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT reminder_minutes FROM user_settings WHERE user_id = ?", (user_id,))
+        row = cursor.fetchone()
+        return row[0] if row else 10
+
+def format_walk_date(walk_dt: datetime) -> str:
+    now = datetime.now()
+    day = walk_dt.day
+    month = MONTH_NAMES.get(walk_dt.month, str(walk_dt.month))
+    if walk_dt.date() == now.date():
+        return "сегодня"
+    elif walk_dt.date() == (now + timedelta(days=1)).date():
+        return "завтра"
+    else:
+        return f"{day} {month}"
+
+# === КЛАВИАТУРЫ ===
+
+def main_menu():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    markup.add("🚶 Прогулки", "⚙️ Настройки")
+    markup.add("🆘 Помощь")
+    return markup
+
+def walks_menu():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
+    markup.add("➕ Предложить время")
+    markup.add("📋 Мои предложения")
+    markup.add("↩️ Назад")
+    return markup
+
+def settings_menu():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
+    markup.add("🔔 Напоминания")
+    markup.add("🗑️ Очистить старые")
+    markup.add("↩️ Назад")
     return markup
 
 def update_all_messages_with_details(proposal_id, proposer_name, time_str, location="", base_comment=""):
@@ -308,35 +362,29 @@ def update_all_messages_with_details(proposal_id, proposer_name, time_str, locat
             return
         walk_dt_str = row[0]
     walk_datetime = datetime.strptime(walk_dt_str, '%Y-%m-%d %H:%M:%S')
-    now = datetime.now()
-    day = walk_datetime.day
-    month = MONTH_NAMES.get(walk_datetime.month, str(walk_datetime.month))
-    if walk_datetime.date() == now.date():
-        date_str = "сегодня"
-    elif walk_datetime.date() == (now + timedelta(days=1)).date():
-        date_str = "завтра"
-    else:
-        date_str = f"{day} {month}"
+    date_str = format_walk_date(walk_datetime)
     full_time_display = f"{time_str}, {date_str}"
     votes = get_votes(proposal_id)
     user_comments = get_comments(proposal_id)
+
     def format_name_with_comment(name):
         comment = user_comments.get(name, "")
-        if comment:
-            return f"{name} — {comment}"
-        return name
+        return f"{name} — {comment}" if comment else name
+
     yes_list = "\n".join([f"• {format_name_with_comment(name)}" for name in votes['yes']]) or "Пока никто"
     later_list = "\n".join([f"• {format_name_with_comment(name)}" for name in votes['later']]) or "Никто не отметил"
     no_list = "\n".join([f"• {name}" for name in votes['no']]) or "Все ещё в раздумьях"
+
     text = f"📅 <b>Прогулка: {full_time_display}</b>\n"
     if location:
         text += f"📍 <b>Место:</b> {location}\n"
     if base_comment:
         text += f"💬 <b>От автора:</b> {base_comment}\n"
-    text += f"\nОт: {proposer_name}\n\n"
-    text += f"✅ <b>Выйду гулять:</b>\n{yes_list}\n\n"
-    text += f"🕗 <b>Выйду позже:</b>\n{later_list}\n\n"
+    text += f"\nОт: {proposer_name}\n"
+    text += f"✅ <b>Выйду гулять:</b>\n{yes_list}\n"
+    text += f"🕗 <b>Выйду позже:</b>\n{later_list}\n"
     text += f"❌ <b>Не пойду:</b>\n{no_list}"
+
     markup = types.InlineKeyboardMarkup()
     markup.add(
         types.InlineKeyboardButton("✅ Выйду гулять", callback_data=f"vote_yes_{proposal_id}"),
@@ -345,6 +393,7 @@ def update_all_messages_with_details(proposal_id, proposer_name, time_str, locat
     markup.add(
         types.InlineKeyboardButton("❌ Не пойду", callback_data=f"vote_no_{proposal_id}")
     )
+
     users = get_all_users()
     for user_id, first_name, username in users:
         try:
@@ -373,14 +422,17 @@ def update_all_messages_with_details(proposal_id, proposer_name, time_str, locat
             print(f"Не удалось обработать сообщение для {user_id}: {e}")
 
 # === ФУНКЦИИ ВВОДА ===
+
 def process_time_input_from_button(message):
     if message.text.startswith('/') or message.text in [
-        "Меню бота", "Предложить время для прогулки", "Мои предложения", "Помощь"
+        "➕ Предложить время", "📋 Мои предложения", "↩️ Назад",
+        "🔔 Напоминания", "🗑️ Очистить старые", "🆘 Помощь",
+        "🚶 Прогулки", "⚙️ Настройки"
     ]:
         bot.send_message(
             message.chat.id,
             "❌ Ожидание времени отменено.",
-            reply_markup=main_menu_keyboard()
+            reply_markup=main_menu()
         )
         return
     time_str = message.text.strip()
@@ -392,7 +444,7 @@ def process_time_input_from_button(message):
     if not can_propose(user_id):
         bot.send_message(message.chat.id, "❌ Лимит исчерпан: можно предлагать не более 3 раз в день.")
         return
-    walk_time = is_time_in_future(time_str)
+    walk_time = parse_proposal_datetime(time_str)
     if walk_time is None:
         bot.send_message(message.chat.id, "❌ Не удалось распознать время.")
         return
@@ -407,8 +459,12 @@ def process_time_input_from_button(message):
     )
 
 def ask_for_location(message, time_str, walk_time, user_name, user_id):
-    if message.text in ["Меню бота", "Предложить время для прогулки", "Мои предложения", "Помощь"] or message.text.startswith('/'):
-        bot.send_message(message.chat.id, "❌ Ожидание отменено.", reply_markup=main_menu_keyboard())
+    if message.text in [
+        "➕ Предложить время", "📋 Мои предложения", "↩️ Назад",
+        "🔔 Напоминания", "🗑️ Очистить старые", "🆘 Помощь",
+        "🚶 Прогулки", "⚙️ Настройки"
+    ] or message.text.startswith('/'):
+        bot.send_message(message.chat.id, "❌ Ожидание отменено.", reply_markup=main_menu())
         return
     location = message.text.strip()
     bot.send_message(message.chat.id, "🗨️ Напишите комментарий к предложению (или отправьте '-' для пропуска):")
@@ -418,8 +474,12 @@ def ask_for_location(message, time_str, walk_time, user_name, user_id):
     )
 
 def ask_for_comment(message, time_str, walk_time, user_name, user_id, location):
-    if message.text in ["Меню бота", "Предложить время для прогулки", "Мои предложения", "Помощь"] or message.text.startswith('/'):
-        bot.send_message(message.chat.id, "❌ Ожидание отменено.", reply_markup=main_menu_keyboard())
+    if message.text in [
+        "➕ Предложить время", "📋 Мои предложения", "↩️ Назад",
+        "🔔 Напоминания", "🗑️ Очистить старые", "🆘 Помощь",
+        "🚶 Прогулки", "⚙️ Настройки"
+    ] or message.text.startswith('/'):
+        bot.send_message(message.chat.id, "❌ Ожидание отменено.", reply_markup=main_menu())
         return
     comment = message.text.strip()
     if comment in [".", "-", ""]:
@@ -429,14 +489,21 @@ def ask_for_comment(message, time_str, walk_time, user_name, user_id, location):
     date_part = walk_time.strftime('%d.%m в %H:%M')
     bot.send_message(
         message.chat.id,
-        f"✅ Предложение на {date_part}\n📍 Место: {location}\n💬 Комментарий: {comment or '—'}\n\nОтправлено всем!",
-        reply_markup=main_menu_keyboard()
+        f"✅ Предложение на {date_part}\n"
+        f"📍 Место: {location}\n"
+        f"💬 Комментарий: {comment or '—'}\n"
+        f"Отправлено всем!",
+        reply_markup=main_menu()
     )
     update_all_messages_with_details(proposal_id, user_name, time_str, location, comment)
 
 def ask_for_location_after_propose(message, time_str, walk_time, user_name, user_id):
-    if message.text in ["Меню бота", "Предложить время для прогулки", "Мои предложения", "Помощь"] or message.text.startswith('/'):
-        bot.send_message(message.chat.id, "❌ Ожидание отменено.", reply_markup=main_menu_keyboard())
+    if message.text in [
+        "➕ Предложить время", "📋 Мои предложения", "↩️ Назад",
+        "🔔 Напоминания", "🗑️ Очистить старые", "🆘 Помощь",
+        "🚶 Прогулки", "⚙️ Настройки"
+    ] or message.text.startswith('/'):
+        bot.send_message(message.chat.id, "❌ Ожидание отменено.", reply_markup=main_menu())
         return
     location = message.text.strip()
     bot.send_message(message.chat.id, "🗨️ Напишите комментарий к предложению (или отправьте '-' для пропуска):")
@@ -446,8 +513,12 @@ def ask_for_location_after_propose(message, time_str, walk_time, user_name, user
     )
 
 def ask_for_comment_after_propose(message, time_str, walk_time, user_name, user_id, location):
-    if message.text in ["Меню бота", "Предложить время для прогулки", "Мои предложения", "Помощь"] or message.text.startswith('/'):
-        bot.send_message(message.chat.id, "❌ Ожидание отменено.", reply_markup=main_menu_keyboard())
+    if message.text in [
+        "➕ Предложить время", "📋 Мои предложения", "↩️ Назад",
+        "🔔 Напоминания", "🗑️ Очистить старые", "🆘 Помощь",
+        "🚶 Прогулки", "⚙️ Настройки"
+    ] or message.text.startswith('/'):
+        bot.send_message(message.chat.id, "❌ Ожидание отменено.", reply_markup=main_menu())
         return
     comment = message.text.strip()
     if comment in [".", "-", ""]:
@@ -456,13 +527,20 @@ def ask_for_comment_after_propose(message, time_str, walk_time, user_name, user_
     increment_proposal_count(user_id)
     bot.reply_to(
         message,
-        f"✅ Предложение на {walk_time.strftime('%d.%m в %H:%M')}\n📍 Место: {location}\n💬 Комментарий: {comment or '—'}\n\nОтправлено всем!"
+        f"✅ Предложение на {walk_time.strftime('%d.%m в %H:%M')}\n"
+        f"📍 Место: {location}\n"
+        f"💬 Комментарий: {comment or '—'}\n"
+        f"Отправлено всем!"
     )
     update_all_messages_with_details(proposal_id, user_name, time_str, location, comment)
 
 def process_comment_input(message, proposal_id, user_id, user_name):
-    if message.text in ["Меню бота", "Предложить время для прогулки", "Мои предложения", "Помощь"] or message.text.startswith('/'):
-        bot.send_message(message.chat.id, "❌ Ввод комментария отменён.", reply_markup=main_menu_keyboard())
+    if message.text in [
+        "➕ Предложить время", "📋 Мои предложения", "↩️ Назад",
+        "🔔 Напоминания", "🗑️ Очистить старые", "🆘 Помощь",
+        "🚶 Прогулки", "⚙️ Настройки"
+    ] or message.text.startswith('/'):
+        bot.send_message(message.chat.id, "❌ Ввод комментария отменён.", reply_markup=main_menu())
         return
     comment = message.text.strip()
     if comment == "-" or len(comment) <= 1:
@@ -474,7 +552,200 @@ def process_comment_input(message, proposal_id, user_id, user_name):
         _, proposer_name, time_str, _, location, base_comment = author_info
         update_all_messages_with_details(proposal_id, proposer_name, time_str, location, base_comment)
 
-# === ОБРАБОТЧИКИ ===
+# === ОБРАБОТЧИКИ МЕНЮ ===
+
+@bot.message_handler(func=lambda m: m.text == "↩️ Назад")
+@allowed_only
+def handle_back(message):
+    bot.send_message(message.chat.id, "Главное меню:", reply_markup=main_menu())
+
+@bot.message_handler(func=lambda m: m.text == "🚶 Прогулки")
+@allowed_only
+def handle_walks_menu(message):
+    bot.send_message(message.chat.id, "Выберите действие:", reply_markup=walks_menu())
+
+@bot.message_handler(func=lambda m: m.text == "⚙️ Настройки")
+@allowed_only
+def handle_settings_menu(message):
+    bot.send_message(message.chat.id, "Настройки:", reply_markup=settings_menu())
+
+@bot.message_handler(func=lambda m: m.text == "➕ Предложить время")
+@allowed_only
+def handle_propose_button(message):
+    bot.send_message(message.chat.id, "🕗 Напишите время в формате ЧЧ:ММ (например, 18:30):")
+    bot.register_next_step_handler(message, process_time_input_from_button)
+
+@bot.message_handler(func=lambda m: m.text == "📋 Мои предложения")
+@allowed_only
+def handle_my_proposals_button(message):
+    my_proposals(message)
+
+@bot.message_handler(func=lambda m: m.text == "🔔 Напоминания")
+@allowed_only
+def handle_reminder_button(message):
+    set_reminder(message)
+
+@bot.message_handler(func=lambda m: m.text == "🗑️ Очистить старые")
+@allowed_only
+def handle_cleanup_old(message):
+    cleanup_old_proposals()
+    auto_delete_old_proposals_by_walk_time()
+    bot.reply_to(message, "✅ Старые записи очищены.")
+
+@bot.message_handler(func=lambda m: m.text == "🆘 Помощь")
+@allowed_only
+def handle_help_button(message):
+    help_cmd(message)
+
+# === КОМАНДЫ ===
+
+@bot.message_handler(commands=['start'])
+@allowed_only
+def start(message):
+    user_id = message.from_user.id
+    first_name = message.from_user.first_name or "Друг"
+    username = message.from_user.username
+    add_user(user_id, first_name, username)
+    bot.reply_to(
+        message,
+        "Привет! 🌤️ Ты в списке для прогулок.\n\n"
+        "👉 Используй меню ниже:\n"
+        "— <b>🚶 Прогулки</b> — предлагать/просматривать\n"
+        "— <b>⚙️ Настройки</b> — напоминания, очистка\n"
+        "— <b>🆘 Помощь</b> — справка",
+        parse_mode='HTML',
+        reply_markup=main_menu()
+    )
+
+@bot.message_handler(commands=['help'])
+@allowed_only
+def help_cmd(message):
+    help_text = (
+        "🧠 <b>Доступные команды:</b>\n"
+        "• <b>/start</b> — открыть главное меню\n"
+        "• <b>/propose ЧЧ:ММ</b> — предложить время (сегодня/завтра)\n"
+        "• <b>/propose 2025-06-15 18:30</b> — на конкретную дату\n"
+        "• <b>/my_proposals</b> — посмотреть свои предложения\n"
+        "• <b>/edit</b> — изменить последнее предложение\n"
+        "• <b>/reminder</b> — настроить напоминания\n"
+        "• <b>/help</b> — показать эту справку\n\n"
+        "💡 Используйте кнопки внизу для быстрого доступа."
+    )
+    bot.send_message(message.chat.id, help_text, parse_mode='HTML', reply_markup=main_menu())
+
+@bot.message_handler(commands=['reminder'])
+@allowed_only
+def set_reminder(message):
+    bot.send_message(
+        message.chat.id,
+        "🔔 <b>Настройка напоминаний</b>\n"
+        "Отправьте число от <b>5 до 120</b> — за сколько минут до прогулки\n"
+        "бот напомнит вам лично.\n\n"
+        "Например: <code>30</code> → напоминание за 30 минут.",
+        parse_mode='HTML'
+    )
+    bot.register_next_step_handler(message, process_reminder_input)
+
+def process_reminder_input(message):
+    try:
+        mins = int(message.text.strip())
+        if 5 <= mins <= 120:
+            set_reminder_minutes(message.from_user.id, mins)
+            bot.reply_to(message, f"✅ Напоминание будет приходить за {mins} минут до прогулки.")
+        else:
+            bot.reply_to(message, "❌ Укажите число от 5 до 120.")
+    except ValueError:
+        bot.reply_to(message, "❌ Введите число (например, 30).")
+
+@bot.message_handler(commands=['my_proposals'])
+@allowed_only
+def my_proposals(message):
+    user_id = message.from_user.id
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT p.id, p.time_str, p.walk_datetime, p.location, p.comment
+            FROM proposals p
+            WHERE p.proposer_id = ?
+            ORDER BY p.walk_datetime DESC
+        """, (user_id,))
+        proposals = cursor.fetchall()
+    if not proposals:
+        bot.reply_to(message, "🕗 У вас пока нет активных предложений.")
+        return
+    full_response = "📁 Ваши предложения:\n"
+    now = datetime.now()
+    for pid, time_str, walk_dt_str, location, comment in proposals:
+        walk_dt = datetime.strptime(walk_dt_str, '%Y-%m-%d %H:%M:%S')
+        date_str = format_walk_date(walk_dt)
+        full_time_display = f"{time_str}, {date_str}"
+        votes = get_votes(pid)
+        user_comments = get_comments(pid)
+
+        def format_name_with_comment(name):
+            comment = user_comments.get(name, "")
+            return f"{name} — {comment}" if comment else name
+
+        yes_list = [format_name_with_comment(name) for name in votes['yes']]
+        later_list = [format_name_with_comment(name) for name in votes['later']]
+        no_list = votes['no']
+
+        proposal_text = f"📅 <b>{full_time_display}</b>\n"
+        if location:
+            proposal_text += f"📍 <b>Место:</b> {location}\n"
+        if comment:
+            proposal_text += f"💬 <b>От вас:</b> {comment}\n"
+        proposal_text += "\n"
+        proposal_text += f"✅ <b>Идут сейчас:</b> ({len(yes_list)})\n"
+        proposal_text += "\n".join([f"• {name}" for name in yes_list]) if yes_list else "Пока никто"
+        proposal_text += "\n"
+        proposal_text += f"🕗 <b>Выйдут позже:</b> ({len(later_list)})\n"
+        proposal_text += "\n".join([f"• {name}" for name in later_list]) if later_list else "Никто не отметил"
+        proposal_text += "\n"
+        proposal_text += f"❌ <b>Не пойдут:</b> ({len(no_list)})\n"
+        proposal_text += "\n".join([f"• {name}" for name in no_list]) if no_list else "Все ещё в раздумьях"
+        full_response += proposal_text + "\n" + ("—" * 30) + "\n"
+
+    if len(full_response) > 4000:
+        full_response = full_response[:4000] + "\n... (обрезано из-за лимита Telegram)"
+    bot.reply_to(message, full_response, parse_mode='HTML')
+
+@bot.message_handler(commands=['propose'])
+@allowed_only
+def propose(message):
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        bot.reply_to(
+            message,
+            "📅 Форматы команды:\n"
+            "• <b>/propose 18:30</b> — сегодня или завтра\n"
+            "• <b>/propose 2025-06-15 18:30</b> — на конкретную дату",
+            parse_mode='HTML'
+        )
+        return
+    time_str = args[1].strip()
+    if not re.match(r'^([01]?[0-9]|2[0-3]):[0-5][0-9]$', time_str):
+        bot.reply_to(message, "Формат: ЧЧ:ММ (например, 18:30)")
+        return
+    user_id = message.from_user.id
+    if not can_propose(user_id):
+        bot.reply_to(message, "❌ Лимит исчерпан: можно предлагать не более 3 раз в день.")
+        return
+    walk_time = parse_proposal_datetime(time_str)
+    if walk_time is None:
+        bot.reply_to(message, "❌ Не удалось распознать время.")
+        return
+    if walk_time <= datetime.now():
+        bot.reply_to(message, "❌ Время уже прошло. Предложите прогулку в будущем.")
+        return
+    user_name = message.from_user.first_name or message.from_user.username or "Аноним"
+    bot.reply_to(message, "📍 Укажите место встречи:")
+    bot.register_next_step_handler(
+        message,
+        lambda msg: ask_for_location_after_propose(msg, time_str, walk_time, user_name, user_id),
+        time_str=time_str, walk_time=walk_time, user_name=user_name, user_id=user_id
+    )
+
 @bot.message_handler(commands=['edit'])
 @allowed_only
 def edit_proposal(message):
@@ -494,13 +765,11 @@ def edit_proposal(message):
             LIMIT 1
         """, (user_id, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
         prop = cursor.fetchone()
-    
     if not prop:
         bot.reply_to(message, "Нет предложений для редактирования (либо уже есть голоса).")
         return
-        
     pid, time_str, location, comment = prop
-    bot.send_message(message.chat.id, f"Редактируем предложение на {time_str}.\n\nНовое время (ЧЧ:ММ):")
+    bot.send_message(message.chat.id, f"Редактируем предложение на {time_str}.\nНовое время (ЧЧ:ММ):")
     bot.register_next_step_handler(
         message, 
         process_edit_time, 
@@ -515,7 +784,7 @@ def process_edit_time(message, proposal_id, old_location, old_comment):
         bot.reply_to(message, "Неверный формат времени. Попробуйте снова:")
         bot.register_next_step_handler(message, process_edit_time, proposal_id, old_location, old_comment)
         return
-    walk_time = is_time_in_future(time_str)
+    walk_time = parse_proposal_datetime(time_str)
     if not walk_time or walk_time <= datetime.now():
         bot.reply_to(message, "Укажите время в будущем.")
         return
@@ -552,11 +821,80 @@ def process_edit_comment(message, proposal_id, new_time, new_time_str, new_locat
             SET time_str = ?, walk_datetime = ?, location = ?, comment = ?
             WHERE id = ?
         """, (new_time_str, new_time.strftime('%Y-%m-%d %H:%M:%S'), new_location, comment, proposal_id))
-    bot.send_message(message.chat.id, "✅ Предложение обновлено!", reply_markup=main_menu_keyboard())
+    bot.send_message(message.chat.id, "✅ Предложение обновлено!", reply_markup=main_menu())
     author_info = get_proposal_author(proposal_id)
     if author_info:
         _, proposer_name, _, _, loc, comm = author_info
         update_all_messages_with_details(proposal_id, proposer_name, new_time_str, loc, comm)
+
+# === CALLBACK-ОБРАБОТЧИКИ ===
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("vote_"))
+def handle_vote(call):
+    if not check_allowed(call.from_user.id):
+        bot.answer_callback_query(call.id, "🔒 Доступ запрещён.", show_alert=True)
+        return
+    parts = call.data.split("_")
+    if len(parts) < 3:
+        return
+    vote_type, proposal_id = parts[1], int(parts[2])
+    if vote_type not in ('yes', 'later', 'no'):
+        vote_type = 'yes'
+    voter_id = call.from_user.id
+    voter_name = call.from_user.first_name or call.from_user.username or "Аноним"
+    add_vote(proposal_id, voter_id, voter_name, vote_type)
+
+    if vote_type == 'yes':
+        votes = get_votes(proposal_id)
+        current_count = len(votes['yes'])
+        if current_count >= 3:
+            author_info = get_proposal_author(proposal_id)
+            if author_info:
+                _, proposer_name, time_str, walk_dt_str, location, base_comment = author_info
+                walk_dt = datetime.strptime(walk_dt_str, '%Y-%m-%d %H:%M:%S')
+                date_word = format_walk_date(walk_dt)
+                confirm_msg = (
+                    f"✅ <b>Прогулка подтверждена!</b>\n"
+                    f"📅 {time_str}, {date_word}\n"
+                )
+                if location:
+                    confirm_msg += f"📍 {location}\n"
+                confirm_msg += f"\n👥 Участники:\n" + "\n".join(f"• {name}" for name in votes['yes'])
+
+                with sqlite3.connect(DB_PATH) as conn:
+                    c = conn.cursor()
+                    c.execute("SELECT voter_id FROM votes WHERE proposal_id = ? AND vote_type = 'yes'", (proposal_id,))
+                    for (voter_id_to_notify,) in c.fetchall():
+                        try:
+                            bot.send_message(voter_id_to_notify, confirm_msg, parse_mode='HTML')
+                        except Exception as e:
+                            print(f"Не удалось отправить уведомление пользователю {voter_id_to_notify}: {e}")
+
+    if vote_type in ('yes', 'later'):
+        bot.send_message(
+            call.message.chat.id,
+            "🗨️ Хотите оставить комментарий? (Например: «С собакой»)\n"
+            "Если не хотите — отправьте «-»."
+        )
+        bot.register_next_step_handler(
+            call.message,
+            process_comment_input,
+            proposal_id=proposal_id,
+            user_id=voter_id,
+            user_name=voter_name
+        )
+    else:
+        author_info = get_proposal_author(proposal_id)
+        if author_info:
+            _, proposer_name, time_str, _, location, comment = author_info
+            update_all_messages_with_details(proposal_id, proposer_name, time_str, location, comment)
+
+    msg = {
+        'yes': "Отлично! Ты в списке «Выйду гулять» 👍",
+        'later': "Хорошо! Отметил как «Выйду позже» ⏳",
+        'no': "Понял. Ты в списке «Не пойду» ❌"
+    }
+    bot.answer_callback_query(call.id, msg[vote_type])
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("confirm_going_"))
 def handle_confirm_going(call):
@@ -587,172 +925,6 @@ def handle_cancel_last_minute(call):
         cursor.execute("DELETE FROM proposals WHERE id = ?", (proposal_id,))
         cursor.execute("DELETE FROM user_proposal_messages WHERE proposal_id = ?", (proposal_id,))
     bot.answer_callback_query(call.id, "Прогулка отменена.", show_alert=True)
-
-@bot.message_handler(commands=['start'])
-@allowed_only
-def start(message):
-    user_id = message.from_user.id
-    first_name = message.from_user.first_name or "Друг"
-    username = message.from_user.username
-    add_user(user_id, first_name, username)
-    bot.reply_to(
-        message,
-        "Привет! 🌤️\nТы в списке для прогулок.\n\n"
-        "• Нажми на кнопку или используй команды:\n"
-        "— Предложить время\n"
-        "— Посмотреть свои предложения\n"
-        "— Помощь",
-        reply_markup=main_menu_keyboard()
-    )
-
-@bot.message_handler(func=lambda m: m.text == "Меню бота")
-@allowed_only
-def handle_menu_button(message):
-    start(message)
-
-@bot.message_handler(func=lambda m: m.text == "Предложить время для прогулки")
-@allowed_only
-def handle_propose_button(message):
-    bot.send_message(message.chat.id, "🕗 Напишите время в формате ЧЧ:ММ (например, 18:30):")
-    bot.register_next_step_handler(message, process_time_input_from_button)
-
-@bot.message_handler(func=lambda m: m.text == "Мои предложения")
-@allowed_only
-def handle_my_proposals_button(message):
-    my_proposals(message)
-
-@bot.message_handler(func=lambda m: m.text == "Помощь")
-@allowed_only
-def handle_help_button(message):
-    help_cmd(message)
-
-@bot.message_handler(commands=['help'])
-@allowed_only
-def help_cmd(message):
-    help_text = (
-        "🧠 <b>Доступные команды:</b>\n\n"
-        "• <b>/start</b> — открыть меню бота\n"
-        "• <b>/propose ЧЧ:ММ</b> — предложить время для прогулки\n"
-        "• <b>/my_proposals</b> — посмотреть свои предложения\n"
-        "• <b>/edit</b> — изменить последнее предложение (до первого голоса)\n"
-        "• <b>/help</b> — показать эту справку\n\n"
-        "💡 Вы также можете использовать кнопки внизу экрана."
-    )
-    bot.send_message(message.chat.id, help_text, parse_mode='HTML', reply_markup=main_menu_keyboard())
-
-@bot.message_handler(commands=['my_proposals'])
-@allowed_only
-def my_proposals(message):
-    user_id = message.from_user.id
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT p.id, p.time_str, 
-                   SUM(CASE WHEN v.vote_type = 'yes' THEN 1 ELSE 0 END) as yes_count
-            FROM proposals p
-            LEFT JOIN votes v ON p.id = v.proposal_id
-            WHERE p.proposer_id = ?
-            GROUP BY p.id
-            ORDER BY p.timestamp DESC
-        """, (user_id,))
-        rows = cursor.fetchall()
-    if not rows:
-        bot.reply_to(message, "🕗 У вас пока нет активных предложений.")
-        return
-    response = "📁 Ваши предложения:\n\n"
-    for _, time_str, yes_count in rows:
-        yes_count = yes_count or 0
-        word = "человек" if yes_count == 1 else "человека" if 2 <= yes_count <= 4 else "людей"
-        response += f"• {time_str} — ({yes_count} {word} выйдут гулять)\n"
-    response += "\n💡 Полный список — в сообщении с предложением."
-    bot.reply_to(message, response)
-
-@bot.message_handler(commands=['propose'])
-@allowed_only
-def propose(message):
-    args = message.text.split(maxsplit=1)
-    if len(args) < 2:
-        bot.reply_to(message, "Укажи время: /propose 18:30")
-        return
-    time_str = args[1].strip()
-    if not re.match(r'^([01]?[0-9]|2[0-3]):[0-5][0-9]$', time_str):
-        bot.reply_to(message, "Формат: ЧЧ:ММ (например, 18:30)")
-        return
-    user_id = message.from_user.id
-    if not can_propose(user_id):
-        bot.reply_to(message, "❌ Лимит исчерпан: можно предлагать не более 3 раз в день.")
-        return
-    walk_time = is_time_in_future(time_str)
-    if walk_time is None:
-        bot.reply_to(message, "❌ Не удалось распознать время.")
-        return
-    if walk_time <= datetime.now():
-        bot.reply_to(message, "❌ Время уже прошло. Предложите прогулку в будущем.")
-        return
-    user_name = message.from_user.first_name or message.from_user.username or "Аноним"
-    bot.reply_to(message, "📍 Укажите место встречи:")
-    bot.register_next_step_handler(
-        message,
-        lambda msg: ask_for_location_after_propose(msg, time_str, walk_time, user_name, user_id),
-        time_str=time_str, walk_time=walk_time, user_name=user_name, user_id=user_id
-    )
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("vote_"))
-def handle_vote(call):
-    if not check_allowed(call.from_user.id):
-        bot.answer_callback_query(call.id, "🔒 Доступ запрещён.", show_alert=True)
-        return
-    parts = call.data.split("_")
-    if len(parts) < 3:
-        return
-    vote_type, proposal_id = parts[1], int(parts[2])
-    if vote_type not in ('yes', 'later', 'no'):
-        vote_type = 'yes'
-    voter_id = call.from_user.id
-    voter_name = call.from_user.first_name or call.from_user.username or "Аноним"
-    add_vote(proposal_id, voter_id, voter_name, vote_type)
-    if vote_type == 'yes':
-        votes = get_votes(proposal_id)
-        current_count = len(votes['yes'])
-        author_info = get_proposal_author(proposal_id)
-        if author_info and current_count == 3:
-            proposer_id, _, time_str, walk_dt_str = author_info[:4]
-            walk_dt = datetime.strptime(walk_dt_str, '%Y-%m-%d %H:%M:%S')
-            day = walk_dt.day
-            month = MONTH_NAMES.get(walk_dt.month, str(walk_dt.month))
-            date_display = f"{time_str}, {day} {month}"
-            try:
-                bot.send_message(
-                    proposer_id,
-                    f"🎉 Прогулка на {date_display} набрала 3 участников!\n\n" +
-                    "\n".join(f"• {name}" for name in votes['yes'])
-                )
-            except Exception as e:
-                print(f"Не удалось отправить уведомление: {e}")
-    if vote_type in ('yes', 'later'):
-        bot.send_message(
-            call.message.chat.id,
-            "🗨️ Хотите оставить комментарий? (Например: «С собакой»)\n\n"
-            "Если не хотите — отправьте «-»."
-        )
-        bot.register_next_step_handler(
-            call.message,
-            process_comment_input,
-            proposal_id=proposal_id,
-            user_id=voter_id,
-            user_name=voter_name
-        )
-    else:
-        author_info = get_proposal_author(proposal_id)
-        if author_info:
-            _, proposer_name, time_str, _, location, comment = author_info
-            update_all_messages_with_details(proposal_id, proposer_name, time_str, location, comment)
-    msg = {
-        'yes': "Отлично! Ты в списке «Выйду гулять» 👍",
-        'later': "Хорошо! Отметил как «Выйду позже» ⏳",
-        'no': "Понял. Ты в списке «Не пойду» ❌"
-    }
-    bot.answer_callback_query(call.id, msg[vote_type])
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("remind_later_"))
 def handle_remind_later(call):
@@ -794,48 +966,51 @@ def handle_cancel_proposal(call):
     bot.answer_callback_query(call.id, "Предложение отменено.", show_alert=True)
 
 # === ФОНОВЫЙ ПОТОК ===
+
 def background_worker():
     while True:
         try:
             now = datetime.now()
             two_hours_ago = now - timedelta(hours=2)
-            ten_minutes_ahead = now + timedelta(minutes=10)
+
             with sqlite3.connect(DB_PATH) as conn:
                 cursor = conn.cursor()
-                # 🔔 Напоминания за 10 минут до прогулки
+
                 cursor.execute("""
-                    SELECT id, proposer_id, time_str
-                    FROM proposals
-                    WHERE walk_datetime BETWEEN ? AND ?
-                    AND processed = 0
-                """, (
-                    now.strftime('%Y-%m-%d %H:%M:%S'),
-                    ten_minutes_ahead.strftime('%Y-%m-%d %H:%M:%S')
-                ))
-                reminders = cursor.fetchall()
-                for pid, proposer_id, time_str in reminders:
-                    cursor.execute("SELECT COUNT(*) FROM votes WHERE proposal_id = ? AND vote_type = 'yes'", (pid,))
-                    going_count = cursor.fetchone()[0]
-                    if going_count > 0:
-                        try:
-                            markup = types.InlineKeyboardMarkup()
-                            markup.add(types.InlineKeyboardButton("✅ Уже выхожу", callback_data=f"confirm_going_{pid}"))
-                            markup.add(types.InlineKeyboardButton("❌ Не получится", callback_data=f"cancel_last_min_{pid}"))
-                            bot.send_message(
-                                proposer_id,
-                                f"⏰ Через 10 минут начинается прогулка на {time_str}!\n\n"
-                                f"Идёшь? Участников: {going_count}",
-                                reply_markup=markup
-                            )
-                            cursor.execute("UPDATE proposals SET processed = 1 WHERE id = ?", (pid,))
-                        except Exception as e:
-                            print(f"Не удалось отправить напоминание автору {proposer_id}: {e}")
-                # 📅 Проверка безотказных предложений
+                    SELECT p.id, p.proposer_id, p.time_str, p.walk_datetime, COALESCE(s.reminder_minutes, 10) AS rem_mins
+                    FROM proposals p
+                    LEFT JOIN user_settings s ON p.proposer_id = s.user_id
+                    WHERE p.walk_datetime > ? AND p.processed = 0
+                """, (now.strftime('%Y-%m-%d %H:%M:%S'),))
+
+                all_proposals = cursor.fetchall()
+                for pid, proposer_id, time_str, walk_dt_str, rem_mins in all_proposals:
+                    walk_dt = datetime.strptime(walk_dt_str, '%Y-%m-%d %H:%M:%S')
+                    remind_time = walk_dt - timedelta(minutes=rem_mins)
+                    if now <= remind_time < now + timedelta(seconds=REMINDER_CHECK_INTERVAL + 1):
+                        cursor.execute("SELECT COUNT(*) FROM votes WHERE proposal_id = ? AND vote_type = 'yes'", (pid,))
+                        going_count = cursor.fetchone()[0]
+                        if going_count > 0:
+                            try:
+                                markup = types.InlineKeyboardMarkup()
+                                markup.add(types.InlineKeyboardButton("✅ Уже выхожу", callback_data=f"confirm_going_{pid}"))
+                                markup.add(types.InlineKeyboardButton("❌ Не получится", callback_data=f"cancel_last_min_{pid}"))
+                                bot.send_message(
+                                    proposer_id,
+                                    f"⏰ Через {rem_mins} минут начинается прогулка на {time_str}!\n"
+                                    f"Идёшь? Участников: {going_count}",
+                                    reply_markup=markup
+                                )
+                                cursor.execute("UPDATE proposals SET processed = 1 WHERE id = ?", (pid,))
+                            except Exception as e:
+                                print(f"❌ Ошибка отправки напоминания автору {proposer_id}: {e}")
+
                 cursor.execute("""
                     SELECT id, proposer_id, proposer_name, time_str, walk_datetime
                     FROM proposals
                     WHERE walk_datetime <= ? AND processed = 0
                 """, (two_hours_ago.strftime('%Y-%m-%d %H:%M:%S'),))
+
                 candidates = cursor.fetchall()
                 for pid, proposer_id, proposer_name, time_str, _ in candidates:
                     cursor.execute("SELECT COUNT(*) FROM votes WHERE proposal_id = ? AND vote_type = 'yes'", (pid,))
@@ -850,20 +1025,22 @@ def background_worker():
                                 f"🕗 Никто не откликнулся на прогулку на {time_str}.\nЧто делаем?",
                                 reply_markup=markup
                             )
+                            cursor.execute("UPDATE proposals SET processed = 1 WHERE id = ?", (pid,))
                         except Exception as e:
-                            print(f"Не удалось отправить уведомление автору {proposer_id}: {e}")
-                        cursor.execute("UPDATE proposals SET processed = 1 WHERE id = ?", (pid,))
+                            print(f"❌ Не удалось отправить уведомление автору {proposer_id}: {e}")
+
             auto_delete_old_proposals_by_walk_time()
             cleanup_old_proposals()
             time.sleep(REMINDER_CHECK_INTERVAL)
+
         except Exception as e:
-            print(f"Ошибка в фоновом потоке: {e}")
+            print(f"🔥 Ошибка в фоновом потоке: {e}")
             time.sleep(REMINDER_CHECK_INTERVAL)
 
 # === ЗАПУСК ===
+
 if __name__ == '__main__':
     init_db()
-    # Миграция для новых колонок
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("PRAGMA table_info(proposals)")
@@ -875,7 +1052,6 @@ if __name__ == '__main__':
             print("🔧 Добавляю editable...")
             cursor.execute("ALTER TABLE proposals ADD COLUMN editable BOOLEAN DEFAULT 1")
         conn.commit()
-        # Исправление старых записей
         if 'walk_datetime' not in columns:
             cursor.execute("SELECT id, time_str, timestamp FROM proposals WHERE walk_datetime = '2025-01-01 00:00:00'")
             old_records = cursor.fetchall()
@@ -893,6 +1069,7 @@ if __name__ == '__main__':
                     print(f"⚠️ Не удалось исправить запись {pid}: {e}")
             conn.commit()
             print(f"✅ Исправлено {len(old_records)} записей.")
+
     threading.Thread(target=background_worker, daemon=True).start()
     print("✅ Бот запущен. Приватность:", "включена" if ALLOWED_USER_IDS else "отключена")
     bot.infinity_polling(timeout=10, long_polling_timeout=5, skip_pending=True)

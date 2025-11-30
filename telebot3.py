@@ -348,23 +348,23 @@ def get_current_proposals():
 
 def main_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    markup.add("🌤️ Прогулки", "⚙️ Настройки")
-    markup.add("🆘 Помощь")
+    markup.add("Прогулки", "Настройки")
+    markup.add("Помощь")
     return markup
 
 def walks_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
-    markup.add("⌛ Предложить время")
-    markup.add("📋 Мои предложения")
-    markup.add("🗺️ Текущие прогулки")
-    markup.add("↩️ Назад")
+    markup.add("Предложить время")
+    markup.add("Мои предложения")
+    markup.add("Текущие прогулки")
+    markup.add("Назад")
     return markup
 
 def settings_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
-    markup.add("🔔 Напоминания")
-    markup.add("🗑️ Очистить старые")
-    markup.add("↩️ Назад")
+    markup.add("Напоминания")
+    markup.add("Очистить старые")
+    markup.add("Назад")
     return markup
 
 def update_all_messages_with_details(proposal_id, proposer_name, time_str, location="", base_comment=""):
@@ -439,15 +439,15 @@ def update_all_messages_with_details(proposal_id, proposer_name, time_str, locat
 
 def process_time_input_from_button(message):
     if message.text.startswith('/') or message.text in [
-        "⌛ Предложить время",
-        "📋 Мои предложения",
-        "🗺️ Текущие прогулки",
-        "↩️ Назад",
-        "🔔 Напоминания",
-        "🗑️ Очистить старые",
-        "🆘 Помощь",
-        "🌤️ Прогулки",
-        "⚙️ Настройки"
+        "Предложить время",
+        "Мои предложения",
+        "Текущие прогулки",
+        "Назад",
+        "Напоминания",
+        "Очистить старые",
+        "Помощь",
+        "Прогулки",
+        "Настройки"
     ]:
         bot.send_message(message.chat.id, "❌ Ожидание времени отменено.", reply_markup=main_menu())
         return
@@ -476,8 +476,8 @@ def process_time_input_from_button(message):
 
 def ask_for_location(message, time_str, walk_time, user_name, user_id):
     if message.text in [
-        "⌛ Предложить время", "📋 Мои предложения", "🗺️ Текущие прогулки", "↩️ Назад",
-        "🔔 Напоминания", "🗑️ Очистить старые", "🆘 Помощь", "🌤️ Прогулки", "⚙️ Настройки"
+        "Предложить время", "Мои предложения", "Текущие прогулки", "Назад",
+        "Напоминания", "Очистить старые", "Помощь", "Прогулки", "Настройки"
     ] or message.text.startswith('/'):
         bot.send_message(message.chat.id, "❌ Ожидание отменено.", reply_markup=main_menu())
         return
@@ -490,8 +490,8 @@ def ask_for_location(message, time_str, walk_time, user_name, user_id):
 
 def ask_for_comment(message, time_str, walk_time, user_name, user_id, location):
     if message.text in [
-        "⌛ Предложить время", "📋 Мои предложения", "🗺️ Текущие прогулки", "↩️ Назад",
-        "🔔 Напоминания", "🗑️ Очистить старые", "🆘 Помощь", "🌤️ Прогулки", "⚙️ Настройки"
+        "Предложить время", "Мои предложения", "Текущие прогулки", "Назад",
+        "Напоминания", "Очистить старые", "Помощь", "Прогулки", "Настройки"
     ] or message.text.startswith('/'):
         bot.send_message(message.chat.id, "❌ Ожидание отменено.", reply_markup=main_menu())
         return
@@ -513,8 +513,8 @@ def ask_for_comment(message, time_str, walk_time, user_name, user_id, location):
 
 def ask_for_location_after_propose(message, time_str, walk_time, user_name, user_id):
     if message.text in [
-        "⌛ Предложить время", "📋 Мои предложения", "🗺️ Текущие прогулки", "↩️ Назад",
-        "🔔 Напоминания", "🗑️ Очистить старые", "🆘 Помощь", "🌤️ Прогулки", "⚙️ Настройки"
+        "Предложить время", "Мои предложения", "Текущие прогулки", "Назад",
+        "Напоминания", "Очистить старые", "Помощь", "Прогулки", "Настройки"
     ] or message.text.startswith('/'):
         bot.send_message(message.chat.id, "❌ Ожидание отменено.", reply_markup=main_menu())
         return
@@ -527,8 +527,8 @@ def ask_for_location_after_propose(message, time_str, walk_time, user_name, user
 
 def ask_for_comment_after_propose(message, time_str, walk_time, user_name, user_id, location):
     if message.text in [
-        "⌛ Предложить время", "📋 Мои предложения", "🗺️ Текущие прогулки", "↩️ Назад",
-        "🔔 Напоминания", "🗑️ Очистить старые", "🆘 Помощь", "🌤️ Прогулки", "⚙️ Настройки"
+        "Предложить время", "Мои предложения", "Текущие прогулки", "Назад",
+        "Напоминания", "Очистить старые", "Помощь", "Прогулки", "Настройки"
     ] or message.text.startswith('/'):
         bot.send_message(message.chat.id, "❌ Ожидание отменено.", reply_markup=main_menu())
         return
@@ -548,8 +548,8 @@ def ask_for_comment_after_propose(message, time_str, walk_time, user_name, user_
 
 def process_comment_input(message, proposal_id, user_id, user_name):
     if message.text in [
-        "⌛ Предложить время", "📋 Мои предложения", "🗺️ Текущие прогулки", "↩️ Назад",
-        "🔔 Напоминания", "🗑️ Очистить старые", "🆘 Помощь", "🌤️ Прогулки", "⚙️ Настройки"
+        "Предложить время", "Мои предложения", "Текущие прогулки", "Назад",
+        "Напоминания", "Очистить старые", "Помощь", "Прогулки", "Настройки"
     ] or message.text.startswith('/'):
         bot.send_message(message.chat.id, "❌ Ввод комментария отменён.", reply_markup=main_menu())
         return
@@ -565,25 +565,24 @@ def process_comment_input(message, proposal_id, user_id, user_name):
 
 # === ОБРАБОТЧИКИ МЕНЮ ===
 
-@bot.message_handler(func=lambda m: m.text == "↩️ Назад")
+@bot.message_handler(func=lambda m: m.text == "Назад")
 @allowed_only
 def handle_back(message):
     bot.send_message(message.chat.id, "Главное меню:", reply_markup=main_menu())
 
-@bot.message_handler(func=lambda m: m.text == "🌤️ Прогулки")
+@bot.message_handler(func=lambda m: m.text == "Прогулки")
 @allowed_only
 def handle_walks_menu(message):
     bot.send_message(message.chat.id, "Выберите действие:", reply_markup=walks_menu())
 
-@bot.message_handler(func=lambda m: m.text == "⚙️ Настройки")
+@bot.message_handler(func=lambda m: m.text == "Настройки")
 @allowed_only
 def handle_settings_menu(message):
     bot.send_message(message.chat.id, "Настройки:", reply_markup=settings_menu())
 
-@bot.message_handler(func=lambda m: m.text == "⌛ Предложить время")
+@bot.message_handler(func=lambda m: m.text == "Предложить время")
 @allowed_only
 def handle_propose_button(message):
-    # ✅ Исправлено: добавлен пример с датой
     bot.send_message(
         message.chat.id,
         "🕗 Напишите время в формате:\n"
@@ -592,12 +591,12 @@ def handle_propose_button(message):
     )
     bot.register_next_step_handler(message, process_time_input_from_button)
 
-@bot.message_handler(func=lambda m: m.text == "📋 Мои предложения")
+@bot.message_handler(func=lambda m: m.text == "Мои предложения")
 @allowed_only
 def handle_my_proposals_button(message):
     my_proposals(message)
 
-@bot.message_handler(func=lambda m: m.text == "🗺️ Текущие прогулки")
+@bot.message_handler(func=lambda m: m.text == "Текущие прогулки")
 @allowed_only
 def show_current_walks(message):
     proposals = get_current_proposals()
@@ -617,19 +616,19 @@ def show_current_walks(message):
         markup.add(types.InlineKeyboardButton("🗳️ Проголосовать", callback_data=f"resend_proposal_{pid}"))
         bot.send_message(message.chat.id, msg_text, reply_markup=markup)
 
-@bot.message_handler(func=lambda m: m.text == "🔔 Напоминания")
+@bot.message_handler(func=lambda m: m.text == "Напоминания")
 @allowed_only
 def handle_reminder_button(message):
     set_reminder(message)
 
-@bot.message_handler(func=lambda m: m.text == "🗑️ Очистить старые")
+@bot.message_handler(func=lambda m: m.text == "Очистить старые")
 @allowed_only
 def handle_cleanup_old(message):
     cleanup_old_proposals()
     auto_delete_old_proposals_by_walk_time()
     bot.reply_to(message, "✅ Старые записи очищены.")
 
-@bot.message_handler(func=lambda m: m.text == "🆘 Помощь")
+@bot.message_handler(func=lambda m: m.text == "Помощь")
 @allowed_only
 def handle_help_button(message):
     help_cmd(message)
@@ -647,9 +646,9 @@ def start(message):
         message,
         "Привет! 🌤️ Ты в списке для прогулок.\n"
         "👉 Используй меню:\n"
-        "— <b>🌤️ Прогулки</b> — предлагать/просматривать\n"
-        "— <b>⚙️ Настройки</b> — напоминания, очистка\n"
-        "— <b>🆘 Помощь</b> — справка",
+        "— Прогулки — предлагать/просматривать\n"
+        "— Настройки — напоминания, очистка\n"
+        "— Помощь — справка",
         parse_mode='HTML',
         reply_markup=main_menu()
     )
@@ -942,8 +941,6 @@ def handle_resend_proposal(call):
         return
     user_id = call.from_user.id
     _, proposer_name, time_str, _, location, base_comment = author_info
-
-    # ✅ Исправлено: всегда отправляем сообщение, даже если оно уже есть
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT walk_datetime FROM proposals WHERE id = ?", (proposal_id,))
@@ -1099,6 +1096,7 @@ def background_worker():
                                 cursor.execute("UPDATE proposals SET processed = 1 WHERE id = ?", (pid,))
                             except Exception as e:
                                 print(f"❌ Ошибка отправки напоминания автору {proposer_id}: {e}")
+
                 cursor.execute("""
                     SELECT id, proposer_id, proposer_name, time_str, walk_datetime
                     FROM proposals
@@ -1121,6 +1119,7 @@ def background_worker():
                             cursor.execute("UPDATE proposals SET processed = 1 WHERE id = ?", (pid,))
                         except Exception as e:
                             print(f"❌ Не удалось отправить уведомление автору {proposer_id}: {e}")
+
             auto_delete_old_proposals_by_walk_time()
             cleanup_old_proposals()
             time.sleep(REMINDER_CHECK_INTERVAL)

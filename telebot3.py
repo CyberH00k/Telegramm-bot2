@@ -438,6 +438,11 @@ def update_all_messages_with_details(proposal_id, proposer_name, time_str, locat
 # === ВВОД ДАННЫХ ===
 
 def process_time_input_from_button(message):
+    # Защита от стикеров, гифок и т.д.
+    if not message.text:
+        bot.send_message(message.chat.id, "❌ Я принимаю только текст. Пожалуйста, введите время в формате ЧЧ:ММ.")
+        return
+
     if message.text.startswith('/') or message.text in [
         "Предложить время",
         "Мои предложения",
@@ -451,22 +456,27 @@ def process_time_input_from_button(message):
     ]:
         bot.send_message(message.chat.id, "❌ Ожидание времени отменено.", reply_markup=main_menu())
         return
+
     time_str = message.text.strip()
     if not re.match(r'^([01]?[0-9]|2[0-3]):[0-5][0-9]$', time_str):
         bot.send_message(message.chat.id, "❌ Неверный формат. Напишите ЧЧ:ММ (например, 18:30):")
         bot.register_next_step_handler(message, process_time_input_from_button)
         return
+
     user_id = message.from_user.id
     if not can_propose(user_id):
         bot.send_message(message.chat.id, "❌ Лимит исчерпан: можно предлагать не более 3 раз в день.")
         return
+
     walk_time = parse_proposal_datetime(time_str)
     if walk_time is None:
         bot.send_message(message.chat.id, "❌ Не удалось распознать время.")
         return
+
     if walk_time <= datetime.now():
         bot.send_message(message.chat.id, "❌ Время уже прошло. Предложите прогулку в будущем.")
         return
+
     user_name = message.from_user.first_name or message.from_user.username or "Аноним"
     bot.send_message(message.chat.id, "📍 Укажите место встречи:")
     bot.register_next_step_handler(
@@ -475,6 +485,9 @@ def process_time_input_from_button(message):
     )
 
 def ask_for_location(message, time_str, walk_time, user_name, user_id):
+    if not message.text:
+        bot.send_message(message.chat.id, "❌ Я понимаю только текст. Пожалуйста, введите текстовое сообщение.")
+        return
     if message.text in [
         "Предложить время", "Мои предложения", "Текущие прогулки", "Назад",
         "Напоминания", "Очистить старые", "Помощь", "Прогулки", "Настройки"
@@ -489,6 +502,10 @@ def ask_for_location(message, time_str, walk_time, user_name, user_id):
     )
 
 def ask_for_comment(message, time_str, walk_time, user_name, user_id, location):
+    if not message.text:
+        bot.send_message(message.chat.id, "❌ Я понимаю только текст. Пожалуйста, введите текстовое сообщение.")
+        return
+
     if message.text in [
         "Предложить время", "Мои предложения", "Текущие прогулки", "Назад",
         "Напоминания", "Очистить старые", "Помощь", "Прогулки", "Настройки"
@@ -512,6 +529,9 @@ def ask_for_comment(message, time_str, walk_time, user_name, user_id, location):
     update_all_messages_with_details(proposal_id, user_name, time_str, location, comment)
 
 def ask_for_location_after_propose(message, time_str, walk_time, user_name, user_id):
+    if not message.text:
+        bot.send_message(message.chat.id, "❌ Я понимаю только текст. Пожалуйста, введите текстовое сообщение.")
+        return
     if message.text in [
         "Предложить время", "Мои предложения", "Текущие прогулки", "Назад",
         "Напоминания", "Очистить старые", "Помощь", "Прогулки", "Настройки"
@@ -526,6 +546,10 @@ def ask_for_location_after_propose(message, time_str, walk_time, user_name, user
     )
 
 def ask_for_comment_after_propose(message, time_str, walk_time, user_name, user_id, location):
+    if not message.text:
+        bot.send_message(message.chat.id, "❌ Я понимаю только текст. Пожалуйста, введите текстовое сообщение.")
+        return
+    
     if message.text in [
         "Предложить время", "Мои предложения", "Текущие прогулки", "Назад",
         "Напоминания", "Очистить старые", "Помощь", "Прогулки", "Настройки"
@@ -547,6 +571,10 @@ def ask_for_comment_after_propose(message, time_str, walk_time, user_name, user_
     update_all_messages_with_details(proposal_id, user_name, time_str, location, comment)
 
 def process_comment_input(message, proposal_id, user_id, user_name):
+    if not message.text:
+        bot.send_message(message.chat.id, "❌ Я понимаю только текст. Пожалуйста, введите текстовое сообщение.")
+        return
+
     if message.text in [
         "Предложить время", "Мои предложения", "Текущие прогулки", "Назад",
         "Напоминания", "Очистить старые", "Помощь", "Прогулки", "Настройки"
@@ -683,6 +711,9 @@ def set_reminder(message):
     bot.register_next_step_handler(message, process_reminder_input)
 
 def process_reminder_input(message):
+    if not message.text:
+        bot.send_message(message.chat.id, "❌ Я понимаю только текст. Пожалуйста, введите текстовое сообщение.")
+        return
     try:
         mins = int(message.text.strip())
         if 5 <= mins <= 120:

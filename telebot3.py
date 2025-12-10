@@ -5,7 +5,9 @@ import time
 from datetime import datetime, date, timedelta
 from telebot import TeleBot, types, apihelper
 import sqlite3
+from dotenv import load_dotenv
 
+load_dotenv()
 # === НАСТРОЙКИ ===
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 if not BOT_TOKEN:
